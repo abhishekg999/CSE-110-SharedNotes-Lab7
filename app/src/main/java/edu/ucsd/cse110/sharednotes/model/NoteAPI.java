@@ -3,16 +3,16 @@ package edu.ucsd.cse110.sharednotes.model;
 import android.util.Log;
 
 import androidx.annotation.AnyThread;
-import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
-
-import com.google.gson.Gson;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 
 public class NoteAPI {
     // TODO: Implement the API using OkHttp!
@@ -72,5 +72,79 @@ public class NoteAPI {
 
         // We can use future.get(1, SECONDS) to wait for the result.
         return future;
+    }
+
+    @WorkerThread
+    public Note getNote(String title) {
+        // URLs cannot contain spaces, so we replace them with %20.
+        String encodedTitle = title.replace(" ", "%20");
+
+        var request = new Request.Builder()
+                .url("https://sharednotes.goto.ucsd.edu/notes/" + encodedTitle)
+                .method("GET", null)
+                .build();
+
+        try (var response = client.newCall(request).execute()) {
+            var responseBody = response.body();
+            if (responseBody != null) {
+                var body = responseBody.string();
+                Log.i("GET NOTE", body);
+                if (response.code() == 200) {
+                    return Note.fromJSON(body);
+                } else {
+                    Log.i("GET NOTE", body);
+                    return null;
+                }
+            } else {
+                Log.e("GET NOTE", "Empty response body");
+                return null;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    @AnyThread
+    public Note getNoteAsync(String title) {
+        var executor = Executors.newSingleThreadExecutor();
+        var future = executor.submit(() -> getNote(title));
+
+        try {
+            return future.get(1, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    @WorkerThread
+    public boolean updateNote(Note note) {
+        String title = note.title;
+
+        var request = new Request.Builder()
+                .url("https://sharednotes.goto.ucsd.edu/notes/" + title)
+                .method("PUT", RequestBody.create(note.toJSON(), MediaType.get("application/json; charset=utf-8")))
+                .build();
+
+        try (var response = client.newCall(request).execute()) {
+            int statusCode = response.code();
+            if (statusCode == 200) {
+                return true;
+            } else {
+                Log.e("UPDATE NOTE", "Update failed: " + response.body().string());
+                return false;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    @AnyThread
+    public void updateNoteAsync(Note note) {
+        var executor = Executors.newSingleThreadExecutor();
+        var future = executor.submit(() -> updateNote(note));
     }
 }
