@@ -8,10 +8,12 @@ import androidx.lifecycle.Observer;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 public class NoteRepository {
     private final NoteDao dao;
+    private ScheduledFuture<?> poller; // what could this be for... hmm?
 
     public NoteRepository(NoteDao dao) {
         this.dao = dao;
@@ -37,7 +39,7 @@ public class NoteRepository {
         Observer<Note> updateFromRemote = theirNote -> {
             var ourNote = note.getValue();
             if (theirNote == null) return; // do nothing
-            if (ourNote == null || ourNote.updatedAt < theirNote.updatedAt) {
+            if (ourNote == null || ourNote.version < theirNote.version) {
                 upsertLocal(theirNote);
             }
         };
@@ -67,7 +69,7 @@ public class NoteRepository {
     }
 
     public void upsertLocal(Note note) {
-        note.updatedAt = Instant.now().getEpochSecond();
+        note.version = note.version + 1;
         dao.upsert(note);
     }
 
@@ -93,12 +95,15 @@ public class NoteRepository {
         // You may (but don't have to) want to cache the LiveData's for each title, so that
         // you don't create a new polling thread every time you call getRemote with the same title.
         // You don't need to worry about killing background threads.
+        if (this.poller != null && !this.poller.isCancelled()) {
+            poller.cancel(true);
+        }
 
         var remote = new MutableLiveData<Note>();
         remote.postValue(NoteAPI.provide().getNoteAsync(title));
 
         var executor = Executors.newSingleThreadScheduledExecutor();
-        var future = executor.scheduleAtFixedRate(() -> {
+        this.poller = executor.scheduleAtFixedRate(() -> {
             remote.postValue(NoteAPI.provide().getNoteAsync(title));
         }, 0, 3, TimeUnit.SECONDS);
 
